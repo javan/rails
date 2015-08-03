@@ -5,15 +5,11 @@ module ActionView
   class DependencyTracker # :nodoc:
     @trackers = ThreadSafe::Cache.new
 
-    def self.find_dependencies(name, template, view_paths = nil)
+    def self.find_dependencies(name, template, options = {})
       tracker = @trackers[template.handler]
       return [] unless tracker.present?
 
-      if tracker.respond_to?(:supports_view_paths?) && tracker.supports_view_paths?
-        tracker.call(name, template, view_paths)
-      else
-        tracker.call(name, template)
-      end
+      tracker.call(name, template, options)
     end
 
     def self.register_tracker(extension, tracker)
@@ -25,7 +21,23 @@ module ActionView
       @trackers.delete(handler)
     end
 
-    class ERBTracker # :nodoc:
+    class Tracker # :nodoc:
+      def self.call(name, template, options = {})
+        new(name, template, options).dependencies
+      end
+
+      attr_reader :name, :template
+
+      def initialize(name, template, options = {})
+        @name, @template, @options = name, template, options
+      end
+
+      def dependencies
+        []
+      end
+    end
+
+    class ERBTracker < Tracker # :nodoc:
       EXPLICIT_DEPENDENCY = /# Template Dependency: (\S+)/
 
       # A valid ruby identifier - suitable for class, method and specially variable names
@@ -43,8 +55,9 @@ module ActionView
       /x
 
       # A simple string literal. e.g. "School's out!"
+      OPENING_QUOTE = %{'"}
       STRING = /
-        (?<quote>['"]) # an opening quote
+        (?<quote>[#{OPENING_QUOTE}])
         (?<static>.*?) # with anything inside, captured as STATIC
         \k<quote>      # and a matching closing quote
       /x
@@ -88,21 +101,14 @@ module ActionView
         true
       end
 
-      def self.call(name, template, view_paths = nil)
-        new(name, template, view_paths).dependencies
-      end
-
-      def initialize(name, template, view_paths = nil)
-        @name, @template, @view_paths = name, template, view_paths
+      def initialize(*)
+        super
+        @view_paths, @helpers = @options.values_at(:view_paths, :helpers)
       end
 
       def dependencies
-        render_dependencies + explicit_dependencies
+        render_dependencies + explicit_dependencies + helper_dependencies
       end
-
-      attr_reader :name, :template
-      private :name, :template
-
 
       private
         def source
@@ -165,8 +171,19 @@ module ActionView
 
           (explicits + resolve_directories(wildcards)).uniq
         end
-    end
 
+        def helper_dependencies
+          return [] unless @helpers
+
+          names = @helpers.instance_methods.map { |name| Regexp.escape(name) }
+          pattern = /<%[^#]*(#{names.join('|')}).*%>/
+
+          source.scan(pattern).flatten.uniq.map { |name| "##{name}" }
+        end
+    end
     register_tracker :erb, ERBTracker
+
+    class HelperTracker < Tracker; end # :nodoc:
+    register_tracker :rb, HelperTracker
   end
 end

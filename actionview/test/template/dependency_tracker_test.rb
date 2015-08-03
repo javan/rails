@@ -3,7 +3,7 @@ require 'abstract_unit'
 require 'action_view/dependency_tracker'
 
 class NeckbeardTracker
-  def self.call(name, template)
+  def self.call(name, template, options = {})
     ["foo/#{name}"]
   end
 end
@@ -14,6 +14,16 @@ class FakeTemplate
   def initialize(source, handler = Neckbeard)
     @source, @handler = source, handler
   end
+end
+
+module MessageHelpers
+  def format_message(message)
+    message
+  end
+end
+
+module Helpers
+  include MessageHelpers
 end
 
 Neckbeard = lambda {|template| template.source }
@@ -48,8 +58,8 @@ class DependencyTrackerTest < ActionView::TestCase
 end
 
 class ERBTrackerTest < Minitest::Test
-  def make_tracker(name, template)
-    ActionView::DependencyTracker::ERBTracker.new(name, template)
+  def make_tracker(name, template, options = {})
+    ActionView::DependencyTracker::ERBTracker.new(name, template, options)
   end
 
   def test_dependency_of_erb_template_with_number_in_filename
@@ -190,5 +200,12 @@ class ERBTrackerTest < Minitest::Test
       "events/event",
       "comments/comment"
     ], tracker.dependencies
+  end
+
+  def test_find_helper_dependencies
+    template = FakeTemplate.new("<%= format_message(message) %>", :erb)
+    tracker = make_tracker("messages/_message", template, helpers: Helpers)
+
+    assert_equal ["#format_message"], tracker.dependencies
   end
 end

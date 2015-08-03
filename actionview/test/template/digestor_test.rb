@@ -44,6 +44,18 @@ class FixtureFinder
   end
 end
 
+module QuietHelpers
+  def format_message(message)
+    message.downcase
+  end
+end
+
+module LoudHelpers
+  def format_message(message)
+    message.upcase
+  end
+end
+
 class TemplateDigestorTest < ActionView::TestCase
   def setup
     @cwd     = Dir.pwd
@@ -294,6 +306,14 @@ class TemplateDigestorTest < ActionView::TestCase
     ActionView::Resolver.caching = resolver_before
   end
 
+  def test_helper_change
+    first_digest = digest("messages/_message", helpers: QuietHelpers)
+    ActionView::Digestor.cache.clear
+    second_digest = digest("messages/_message", helpers: LoudHelpers)
+    ActionView::Digestor.cache.clear
+
+    assert first_digest != second_digest, "digests are equal #{first_digest}, #{second_digest}"
+  end
 
   private
     def assert_logged(message)

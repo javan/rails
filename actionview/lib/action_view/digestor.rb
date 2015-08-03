@@ -1,6 +1,7 @@
 require 'thread_safe'
 require 'action_view/dependency_tracker'
 require 'monitor'
+require 'method_source'
 
 module ActionView
   class Digestor
@@ -20,18 +21,25 @@ module ActionView
       #
       # * <tt>name</tt>   - Template name
       # * <tt>finder</tt>  - An instance of <tt>ActionView::LookupContext</tt>
+      # * <tt>helpers</tt>  - A module of helper methods
       # * <tt>dependencies</tt>  - An array of dependent views
       # * <tt>partial</tt>  - Specifies whether the template is a partial
       def digest(options)
-        options.assert_valid_keys(:name, :finder, :dependencies, :partial)
+        options.assert_valid_keys(:name, :finder, :helpers, :dependencies, :partial)
 
         cache_key = ([ options[:name], options[:finder].details_key.hash ].compact + Array.wrap(options[:dependencies])).join('.')
 
+        fetch(cache_key) do
+          compute_and_store_digest(cache_key, options)
+        end
+      end
+
+      def fetch(cache_key)
         # this is a correctly done double-checked locking idiom
         # (ThreadSafe::Cache's lookups have volatile semantics)
         @@cache[cache_key] || @@digest_monitor.synchronize do
           @@cache.fetch(cache_key) do # re-check under lock
-            compute_and_store_digest(cache_key, options)
+            yield
           end
         end
       end
@@ -55,11 +63,11 @@ module ActionView
         end
     end
 
-    attr_reader :name, :finder, :options
+    attr_reader :name, :finder, :helpers, :options
 
     def initialize(options)
-      @name, @finder = options.values_at(:name, :finder)
-      @options = options.except(:name, :finder)
+      @name, @finder, @helpers = options.values_at(:name, :finder, :helpers)
+      @options = options.except(:name, :finder, :helpers)
     end
 
     def digest
@@ -72,7 +80,7 @@ module ActionView
     end
 
     def dependencies
-      DependencyTracker.find_dependencies(name, template, finder.view_paths)
+      DependencyTracker.find_dependencies(name, template, view_paths: finder.view_paths, helpers: helpers)
     rescue ActionView::MissingTemplate
       logger.try :error, "  '#{name}' file doesn't exist, so no dependencies"
       []
@@ -80,7 +88,7 @@ module ActionView
 
     def nested_dependencies
       dependencies.collect do |dependency|
-        dependencies = PartialDigestor.new(name: dependency, finder: finder).nested_dependencies
+        dependencies = PartialDigestor.new(name: dependency, finder: finder, helpers: helpers).nested_dependencies
         dependencies.any? ? { dependency => dependencies } : dependency
       end
     end
@@ -98,8 +106,27 @@ module ActionView
         false
       end
 
+      def helper?
+        name.start_with?('#')
+      end
+
+      def helper_method
+        helpers.instance_method(name.sub(/^#/, ''))
+      end
+
+      def helper_template
+        Digestor.fetch("helper-template:#{name}") do
+          OpenStruct.new(handler: :rb, source: helper_method.source)
+        end
+      end
+
       def template
-        @template ||= finder.disable_cache { finder.find(logical_name, [], partial?) }
+        @template ||=
+          if helper?
+            helper_template
+          else
+            finder.disable_cache { finder.find(logical_name, [], partial?) }
+          end
       end
 
       def source
@@ -108,7 +135,7 @@ module ActionView
 
       def dependency_digest
         template_digests = dependencies.collect do |template_name|
-          Digestor.digest(name: template_name, finder: finder, partial: true)
+          Digestor.digest(name: template_name, finder: finder, helpers: helpers, partial: true)
         end
 
         (template_digests + injected_dependencies).join("-")

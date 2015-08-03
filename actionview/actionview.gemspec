@@ -23,6 +23,7 @@ Gem::Specification.new do |s|
 
   s.add_dependency 'builder',       '~> 3.1'
   s.add_dependency 'erubis',        '~> 2.7.0'
+  s.add_dependency 'method_source', '~> 0.8.2'
   s.add_dependency 'rails-html-sanitizer', '~> 1.0', '>= 1.0.2'
   s.add_dependency 'rails-dom-testing', '~> 1.0', '>= 1.0.5'
 

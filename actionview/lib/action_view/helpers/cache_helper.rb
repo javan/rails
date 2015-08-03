@@ -230,7 +230,7 @@ module ActionView
         virtual_path ||= @virtual_path
         if virtual_path
           name  = controller.url_for(name).split("://").last if name.is_a?(Hash)
-          digest = Digestor.digest name: virtual_path, finder: lookup_context, dependencies: view_cache_dependencies
+          digest = Digestor.digest name: virtual_path, finder: lookup_context, dependencies: view_cache_dependencies, helpers: helpers_for_digestor
           [ name, digest ]
         else
           name
@@ -257,6 +257,12 @@ module ActionView
           self.output_buffer = output_buffer.class.new(output_buffer)
         end
         controller.write_fragment(name, fragment, options)
+      end
+
+      def helpers_for_digestor
+        if defined?(ApplicationController)
+          ApplicationController._helpers
+        end
       end
     end
   end
